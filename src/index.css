@@ -1,0 +1,81 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --bg-canvas: #F8FAF7;
+    --bg-surface: #FFFFFF;
+    --bg-subtle: #EFF5F1;
+    --border-hairline: #DCE7E0;
+    --text-primary: #0A251C;
+    --text-secondary: #436155;
+    --accent-emerald: #0B4F3A;
+    --accent-gold: #9A741E;
+    --accent-gold-bright: #C59B38;
+  }
+
+  .dark {
+    --bg-canvas: #061A14;
+    --bg-surface: #0C2920;
+    --bg-subtle: #113529;
+    --border-hairline: #1C4B3B;
+    --text-primary: #F2F7F4;
+    --text-secondary: #9EC0B2;
+    --accent-emerald: #19785A;
+    --accent-gold: #E5C366;
+    --accent-gold-bright: #D4AF37;
+  }
+
+  html {
+    font-family: 'Cairo', system-ui, -apple-system, sans-serif;
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
+    overflow-x: hidden;
+  }
+}
+
+.font-quran {
+  font-family: 'Amiri', Georgia, serif;
+}
+
+.font-mono-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Subtle Islamic 8-point geometric background pattern using pure CSS radial/linear gradients */
+.islamic-lattice {
+  background-image:
+    radial-gradient(circle at 50% 50%, rgba(197, 155, 56, 0.07) 1px, transparent 1px),
+    linear-gradient(45deg, rgba(11, 79, 58, 0.03) 25%, transparent 25%, transparent 75%, rgba(11, 79, 58, 0.03) 75%),
+    linear-gradient(-45deg, rgba(11, 79, 58, 0.03) 25%, transparent 25%, transparent 75%, rgba(11, 79, 58, 0.03) 75%);
+  background-size: 28px 28px;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
