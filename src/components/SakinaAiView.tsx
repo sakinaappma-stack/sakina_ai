@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { GoogleGenAI, LiveServerMessage, Modality, type Session } from '@google/genai';
 import {
   Mic,
   Pause,
@@ -12,6 +13,8 @@ import {
 import type { ChatMessage, LanguageCode, SakinaAiVoice } from '../types';
 import type { UITranslation } from '../i18n/translations';
 
+declare const __SAKINA_GEMINI_API_KEY__: string;
+
 interface SakinaAiViewProps {
   language: LanguageCode;
   cityName: string;
@@ -24,6 +27,88 @@ const DEFAULT_WAVEFORM = [
   0.28, 0.45, 0.72, 0.55, 0.85, 0.62, 0.38, 0.78, 0.92, 0.5, 0.66, 0.42,
   0.84, 0.6, 0.35, 0.74, 0.88, 0.52, 0.68, 0.4, 0.76, 0.54, 0.36, 0.48,
 ];
+
+function resolveGeminiApiKey(): string {
+  const fromVite = import.meta.env.VITE_GEMINI_API_KEY;
+  const fromDefine =
+    typeof __SAKINA_GEMINI_API_KEY__ !== 'undefined' ? __SAKINA_GEMINI_API_KEY__ : '';
+  return String(fromVite || fromDefine || '').trim();
+}
+
+function resolveAiLanguageLabel(lang: string, darijaMode: boolean): string {
+  const base = String(lang || 'ar').trim().toLowerCase().split('-')[0];
+  if (base === 'ar') {
+    return darijaMode
+      ? 'natural, warm Moroccan Darija (الدارجة المغربية الأصيلة والمفهومة) — or Modern Standard Arabic if the user speaks in MSA'
+      : 'clear Modern Standard Arabic (العربية الفصحى السلسة)';
+  }
+  try {
+    const label = new Intl.DisplayNames(['en'], { type: 'language' }).of(lang);
+    if (label && label.toLowerCase() !== lang.toLowerCase()) {
+      return label;
+    }
+  } catch {
+    // fallback below
+  }
+  return lang || 'English';
+}
+
+function buildTextSystemInstruction(
+  lang: string,
+  darijaMode: boolean,
+  cityName: string,
+  countryName: string
+): string {
+  const targetLanguage = resolveAiLanguageLabel(lang, darijaMode);
+  const locationContext =
+    cityName && countryName ? `The user is currently located in ${cityName}, ${countryName}.` : '';
+
+  return `You are "السكينة AI" (Sakina AI), an intelligent, warm, open-minded, and deeply helpful assistant and spiritual companion.
+You can answer ANY question the user asks freely and thoroughly—whether about daily life, technology, study, work, health tips, relationships, cooking, history, advice, emotional calm, Quran, Hadith, or Islamic guidance. Never refuse general everyday questions; be genuinely helpful on every topic while keeping a respectful, serene tone.
+Language instruction: Respond in ${targetLanguage}. If the user writes or speaks in Moroccan Darija (الدارجة المغربية), always respond naturally in Moroccan Darija using clear Arabic script (with gentle warmth like خويا/أختي where fitting). If the user asks in another language (French, English, etc.), respond in that language.
+${locationContext}
+Keep your answers clear, practical, conversational, and easy to read (avoid cluttered markdown symbols like asterisks or complex tables).`;
+}
+
+function buildLiveSystemInstruction(
+  lang: string,
+  darijaMode: boolean,
+  cityName: string,
+  countryName: string
+): string {
+  const targetLanguage = resolveAiLanguageLabel(lang, darijaMode);
+  const locationContext =
+    cityName && countryName ? `The user is located in ${cityName}, ${countryName}.` : '';
+
+  return `You are "السكينة AI" (Sakina AI), a warm, wise, friendly voice companion.
+Respond ONLY with a natural spoken voice like a close, helpful friend sending a WhatsApp voice reply—concise, clear, and comforting.
+Speak in ${targetLanguage}. If the user speaks in Moroccan Darija, respond naturally in Moroccan Darija; if they speak another language, match their language naturally.
+${locationContext}
+Answer any question the user asks freely (daily life, advice, emotional calm, Quran, Hadith, Islamic guidance, study, work, cooking, general knowledge).`;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, timeoutMessage: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(timeoutMessage)), ms);
+    promise.then(
+      (val) => {
+        clearTimeout(timer);
+        resolve(val);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
+function isModelNotFoundError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err || '');
+  return /404|not found|not supported for generateContent|not supported for bidiGenerateContent/i.test(
+    msg
+  );
+}
 
 function formatDuration(seconds: number): string {
   const safe = Math.max(0, Math.round(seconds));
@@ -80,7 +165,10 @@ function base64ToInt16(base64: string): Int16Array {
   return new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
 }
 
-function buildWavObjectUrl(chunks: Int16Array[], sampleRate: number): { url: string; durationSec: number; waveform: number[] } {
+function buildWavObjectUrl(
+  chunks: Int16Array[],
+  sampleRate: number
+): { url: string; durationSec: number; waveform: number[] } {
   const totalSamples = chunks.reduce((acc, c) => acc + c.length, 0);
   const dataBytes = totalSamples * 2;
   const buffer = new ArrayBuffer(44 + dataBytes);
@@ -113,7 +201,6 @@ function buildWavObjectUrl(chunks: Int16Array[], sampleRate: number): { url: str
     offset += c.length;
   }
 
-  // Compute 24 normalized waveform bars from PCM samples
   const bars = 24;
   const waveform: number[] = [];
   if (totalSamples === 0) {
@@ -165,8 +252,12 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  // Live API & Audio Refs (useRef prevents stale closures inside audio callbacks)
-  const wsRef = useRef<WebSocket | null>(null);
+  // Direct Browser Live API & Audio Refs
+  const liveSessionRef = useRef<Session | null>(null);
+  const liveConnectingPromiseRef = useRef<Promise<Session> | null>(null);
+  const liveTurnActiveRef = useRef(false);
+  const responseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const inputCtxRef = useRef<AudioContext | null>(null);
   const outputCtxRef = useRef<AudioContext | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -196,7 +287,6 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading, aiLiveResponding]);
 
-  // Live recording duration timer
   useEffect(() => {
     if (!isRecording) {
       setRecordingSeconds(0);
@@ -207,6 +297,13 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
     }, 250);
     return () => clearInterval(timer);
   }, [isRecording]);
+
+  const clearResponseTimeout = () => {
+    if (responseTimeoutRef.current) {
+      clearTimeout(responseTimeoutRef.current);
+      responseTimeoutRef.current = null;
+    }
+  };
 
   const stopBubblePlayback = () => {
     if (bubbleAudioRef.current) {
@@ -262,15 +359,18 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
   };
 
   const closeLiveSession = () => {
+    clearResponseTimeout();
     cleanupMicPipeline();
     stopLiveAudioOutput();
-    if (wsRef.current) {
+    liveTurnActiveRef.current = false;
+    liveConnectingPromiseRef.current = null;
+    if (liveSessionRef.current) {
       try {
-        wsRef.current.close();
+        liveSessionRef.current.close();
       } catch {
         // ignore
       }
-      wsRef.current = null;
+      liveSessionRef.current = null;
     }
     setAiLiveResponding(false);
   };
@@ -292,19 +392,23 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
 
   // Reconnect fresh Live session immediately when voice, language, or mode changes
   useEffect(() => {
-    if (!isRecordingRef.current && wsRef.current) {
+    if (!isRecordingRef.current && liveSessionRef.current) {
       try {
-        wsRef.current.close();
+        liveSessionRef.current.close();
       } catch {
         // ignore
       }
-      wsRef.current = null;
+      liveSessionRef.current = null;
+      liveConnectingPromiseRef.current = null;
+      liveTurnActiveRef.current = false;
     }
   }, [language, darijaMode, cityName, aiVoice]);
 
   const ensureOutputAudioContext = () => {
     if (!outputCtxRef.current || outputCtxRef.current.state === 'closed') {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       outputCtxRef.current = new AudioCtx({ sampleRate: 24000 });
     }
     if (outputCtxRef.current.state === 'suspended') {
@@ -343,6 +447,7 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
   };
 
   const finalizeAiVoiceTurn = () => {
+    clearResponseTimeout();
     const chunks = aiPcmChunksRef.current;
     aiPcmChunksRef.current = [];
     setAiLiveResponding(false);
@@ -363,85 +468,124 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
     ]);
   };
 
-  const ensureLiveWebSocket = (): Promise<WebSocket> => {
-    const existing = wsRef.current;
-    if (existing && existing.readyState === WebSocket.OPEN) {
-      return Promise.resolve(existing);
+  const connectLiveWithModel = (
+    liveAi: GoogleGenAI,
+    model: string,
+    voiceName: string,
+    systemInstruction: string
+  ): Promise<Session> => {
+    return withTimeout(
+      liveAi.live.connect({
+        model,
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName } },
+          },
+          realtimeInputConfig: {
+            automaticActivityDetection: {
+              disabled: true,
+            },
+          },
+          systemInstruction,
+        },
+        callbacks: {
+          onmessage: (message: LiveServerMessage) => {
+            for (const part of message.serverContent?.modelTurn?.parts ?? []) {
+              if (part.inlineData?.data && !cancelledRef.current) {
+                clearResponseTimeout();
+                setAiLiveResponding(true);
+                scheduleAiPcmChunk(part.inlineData.data);
+              }
+            }
+
+            if (message.serverContent?.interrupted) {
+              clearResponseTimeout();
+              stopLiveAudioOutput();
+              aiPcmChunksRef.current = [];
+              setAiLiveResponding(false);
+            }
+
+            if (message.serverContent?.turnComplete) {
+              finalizeAiVoiceTurn();
+            }
+          },
+          onerror: (err: unknown) => {
+            clearResponseTimeout();
+            setAiLiveResponding(false);
+            const evtMsg = (err as { message?: string })?.message;
+            const msg = evtMsg || (err instanceof Error ? err.message : 'Gemini Live API error');
+            setError(`${t.ai.errorPrefix}${msg}`);
+          },
+          onclose: () => {
+            clearResponseTimeout();
+            liveSessionRef.current = null;
+            liveConnectingPromiseRef.current = null;
+            liveTurnActiveRef.current = false;
+            if (aiPcmChunksRef.current.length > 0) {
+              finalizeAiVoiceTurn();
+            } else {
+              setAiLiveResponding(false);
+            }
+          },
+        },
+      }),
+      15000,
+      'Gemini Live connection timed out'
+    );
+  };
+
+  const ensureLiveSession = async (): Promise<Session> => {
+    if (liveSessionRef.current) {
+      return liveSessionRef.current;
     }
-    if (existing && existing.readyState === WebSocket.CONNECTING) {
-      return new Promise((resolve, reject) => {
-        const onOpen = () => {
-          existing.removeEventListener('open', onOpen);
-          resolve(existing);
-        };
-        const onErr = () => {
-          existing.removeEventListener('error', onErr);
-          reject(new Error('WebSocket connection failed'));
-        };
-        existing.addEventListener('open', onOpen);
-        existing.addEventListener('error', onErr);
-      });
+    if (liveConnectingPromiseRef.current) {
+      return liveConnectingPromiseRef.current;
     }
 
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const qs = new URLSearchParams({
-      lang: language,
-      darija: darijaMode ? '1' : '0',
-      voice: aiVoice,
-      city: cityName,
-      country: countryName,
-    });
-    const ws = new WebSocket(`${wsProtocol}//${window.location.host}/live?${qs.toString()}`);
-    wsRef.current = ws;
+    const apiKey = resolveGeminiApiKey();
+    if (!apiKey) {
+      throw new Error('Missing VITE_GEMINI_API_KEY in environment variables.');
+    }
 
-    ws.onmessage = (event) => {
-      let msg: { type?: string; data?: string; message?: string };
+    const liveAi = new GoogleGenAI({ apiKey, apiVersion: 'v1beta' });
+    const voiceName = aiVoice === 'man' ? 'Charon' : 'Zephyr';
+    const systemInstruction = buildLiveSystemInstruction(
+      language,
+      darijaMode,
+      cityName,
+      countryName
+    );
+
+    const promise = (async () => {
       try {
-        msg = JSON.parse(event.data as string);
-      } catch {
-        return;
-      }
-
-      if (msg.type === 'audio' && msg.data) {
-        if (!cancelledRef.current) {
-          setAiLiveResponding(true);
-          scheduleAiPcmChunk(msg.data);
+        const session = await connectLiveWithModel(
+          liveAi,
+          'gemini-3.8-live',
+          voiceName,
+          systemInstruction
+        );
+        liveSessionRef.current = session;
+        return session;
+      } catch (err) {
+        if (isModelNotFoundError(err)) {
+          const fallbackSession = await connectLiveWithModel(
+            liveAi,
+            'gemini-2.5-flash-native-audio-preview-12-2025',
+            voiceName,
+            systemInstruction
+          );
+          liveSessionRef.current = fallbackSession;
+          return fallbackSession;
         }
-      } else if (msg.type === 'interrupted') {
-        stopLiveAudioOutput();
-        aiPcmChunksRef.current = [];
-        setAiLiveResponding(false);
-      } else if (msg.type === 'turnComplete') {
-        finalizeAiVoiceTurn();
-      } else if (msg.type === 'error') {
-        setAiLiveResponding(false);
-        setError(`${t.ai.errorPrefix}${msg.message || 'Live voice error'}`);
+        throw err;
+      } finally {
+        liveConnectingPromiseRef.current = null;
       }
-    };
+    })();
 
-    ws.onclose = () => {
-      if (wsRef.current === ws) {
-        wsRef.current = null;
-      }
-      if (aiPcmChunksRef.current.length > 0) {
-        finalizeAiVoiceTurn();
-      } else {
-        setAiLiveResponding(false);
-      }
-    };
-
-    return new Promise((resolve, reject) => {
-      const onOpen = () => {
-        ws.removeEventListener('open', onOpen);
-        resolve(ws);
-      };
-      const onErr = () => {
-        ws.removeEventListener('error', onErr);
-        reject(new Error('WebSocket connection failed'));
-      };
-      ws.addEventListener('open', onOpen);
-      ws.addEventListener('error', onErr);
-    });
+    liveConnectingPromiseRef.current = promise;
+    return promise;
   };
 
   const startWhatsAppRecording = async () => {
@@ -453,6 +597,13 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
     aiPcmChunksRef.current = [];
     userPcmChunksRef.current = [];
     cancelledRef.current = false;
+    liveTurnActiveRef.current = false;
+
+    const apiKey = resolveGeminiApiKey();
+    if (!apiKey) {
+      setError(`${t.ai.errorPrefix}Missing VITE_GEMINI_API_KEY environment variable.`);
+      return;
+    }
 
     ensureOutputAudioContext();
 
@@ -462,7 +613,7 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
     }
 
     try {
-      const wsPromise = ensureLiveWebSocket();
+      const sessionPromise = ensureLiveSession();
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -473,7 +624,9 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
 
       micStreamRef.current = stream;
 
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const inputCtx = new AudioCtx({ sampleRate: 16000 });
       inputCtxRef.current = inputCtx;
       if (inputCtx.state === 'suspended') {
@@ -489,14 +642,16 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
       recordStartMsRef.current = Date.now();
       setIsRecording(true);
 
-      wsPromise
-        .then((ws) => {
-          if (isRecordingRef.current && !cancelledRef.current && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'activityStart' }));
+      sessionPromise
+        .then((session) => {
+          if (isRecordingRef.current && !cancelledRef.current && !liveTurnActiveRef.current) {
+            liveTurnActiveRef.current = true;
+            session.sendRealtimeInput({ activityStart: {} });
           }
         })
-        .catch(() => {
-          // handled on error event
+        .catch((err) => {
+          cleanupMicPipeline();
+          setError(`${t.ai.errorPrefix}${err instanceof Error ? err.message : 'Live error'}`);
         });
 
       processor.onaudioprocess = (ev) => {
@@ -507,7 +662,6 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
         const int16 = float32ToInt16(resampled);
         userPcmChunksRef.current.push(int16);
 
-        // Compute visual microphone bar level
         let sumSq = 0;
         for (let i = 0; i < resampled.length; i += 4) {
           sumSq += resampled[i] * resampled[i];
@@ -517,18 +671,22 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
         setLiveBars((prev) => [...prev.slice(1), level]);
 
         const base64Audio = int16ToBase64(int16);
-        wsPromise
-          .then((ws) => {
-            if (isRecordingRef.current && !cancelledRef.current && ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: 'audio', audio: base64Audio }));
+        sessionPromise
+          .then((session) => {
+            if (!isRecordingRef.current || cancelledRef.current) return;
+            if (!liveTurnActiveRef.current) {
+              liveTurnActiveRef.current = true;
+              session.sendRealtimeInput({ activityStart: {} });
             }
+            session.sendRealtimeInput({
+              audio: { data: base64Audio, mimeType: 'audio/pcm;rate=16000' },
+            });
           })
           .catch(() => {
-            // handled on error event
+            // handled in catch above
           });
       };
 
-      // Connect through muted gain node so ScriptProcessor fires without echoing mic to speaker
       const silentGain = inputCtx.createGain();
       silentGain.gain.value = 0;
       source.connect(processor);
@@ -564,34 +722,34 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
     ]);
 
     setAiLiveResponding(true);
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'activityEnd' }));
-    } else {
-      ensureLiveWebSocket()
-        .then((openedWs) => {
-          if (openedWs.readyState === WebSocket.OPEN) {
-            openedWs.send(JSON.stringify({ type: 'activityEnd' }));
-          }
-        })
-        .catch(() => {
-          setAiLiveResponding(false);
-        });
-    }
+    clearResponseTimeout();
+    responseTimeoutRef.current = setTimeout(() => {
+      if (aiPcmChunksRef.current.length > 0) {
+        finalizeAiVoiceTurn();
+      } else {
+        setAiLiveResponding(false);
+        setError(`${t.ai.errorPrefix}Voice response timed out.`);
+      }
+    }, 25000);
+
+    ensureLiveSession()
+      .then((session) => {
+        if (liveTurnActiveRef.current) {
+          liveTurnActiveRef.current = false;
+          session.sendRealtimeInput({ activityEnd: {} });
+        }
+      })
+      .catch((err) => {
+        clearResponseTimeout();
+        setAiLiveResponding(false);
+        setError(`${t.ai.errorPrefix}${err instanceof Error ? err.message : 'Live voice error'}`);
+      });
   };
 
   const cancelWhatsAppRecording = () => {
     cancelledRef.current = true;
     userPcmChunksRef.current = [];
-    cleanupMicPipeline();
-    if (wsRef.current) {
-      try {
-        wsRef.current.close();
-      } catch {
-        // ignore
-      }
-      wsRef.current = null;
-    }
+    closeLiveSession();
   };
 
   const handleMicPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
@@ -603,7 +761,6 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
       window.removeEventListener('pointercancel', onRelease);
       if (!isRecordingRef.current) return;
       const heldMs = Date.now() - pressStartMs;
-      // Hold-and-release (> 350ms) sends immediately like WhatsApp; quick tap keeps recording bar open
       if (heldMs > 350) {
         finishAndSendVoiceNote();
       }
@@ -662,6 +819,12 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
     setError(null);
     stopBubblePlayback();
 
+    const apiKey = resolveGeminiApiKey();
+    if (!apiKey) {
+      setError(`${t.ai.errorPrefix}Missing VITE_GEMINI_API_KEY in environment variables.`);
+      return;
+    }
+
     const userMsg: ChatMessage = {
       id: `u-${Date.now()}`,
       role: 'user',
@@ -674,24 +837,47 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
     setLoading(true);
 
     try {
-      const historyPayload = nextMessages
+      const contents = nextMessages
         .filter((m) => Boolean(m.text))
-        .map((m) => ({ role: m.role, text: m.text || '' }));
+        .map((m) => ({
+          role: m.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: String(m.text || '') }],
+        }));
 
-      const res = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: historyPayload,
-          lang: language,
-          darijaMode,
-          cityName,
-          countryName,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Request failed');
+      const systemInstruction = buildTextSystemInstruction(
+        language,
+        darijaMode,
+        cityName,
+        countryName
+      );
+
+      const ai = new GoogleGenAI({ apiKey });
+
+      const runGenerate = (model: string) =>
+        withTimeout(
+          ai.models.generateContent({
+            model,
+            contents,
+            config: { systemInstruction },
+          }),
+          20000,
+          'AI request timed out'
+        );
+
+      let response;
+      try {
+        response = await runGenerate('gemini-4-hydrogen');
+      } catch (err) {
+        if (isModelNotFoundError(err)) {
+          response = await runGenerate('gemini-2.5-flash');
+        } else {
+          throw err;
+        }
+      }
+
+      const reply = response.text?.trim();
+      if (!reply) {
+        throw new Error('Empty response from Gemini model');
       }
 
       setMessages((prev) => [
@@ -699,7 +885,7 @@ export const SakinaAiView: React.FC<SakinaAiViewProps> = ({
         {
           id: `a-${Date.now()}`,
           role: 'assistant',
-          text: String(data.reply || ''),
+          text: reply,
         },
       ]);
     } catch (err) {

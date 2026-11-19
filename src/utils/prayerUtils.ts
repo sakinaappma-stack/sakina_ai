@@ -68,25 +68,25 @@ export const MUEZZINS: MuezzinOption[] = [
     id: 'moroccan',
     arabicName: 'الأذان المغربي',
     latinName: 'Moroccan Adhan',
-    audioUrl: '/api/audio/adhan/moroccan',
+    audioUrl: 'https://www.islamcan.com/audio/adhan/azan5.mp3',
   },
   {
     id: 'makkah',
     arabicName: 'أذان الحرم المكي',
     latinName: 'Al-Haram (Makkah)',
-    audioUrl: '/api/audio/adhan/makkah',
+    audioUrl: 'https://www.islamcan.com/audio/adhan/azan1.mp3',
   },
   {
     id: 'madinah',
     arabicName: 'أذان المسجد النبوي',
     latinName: 'Al-Nabawi (Madinah)',
-    audioUrl: '/api/audio/adhan/madinah',
+    audioUrl: 'https://www.islamcan.com/audio/adhan/azan2.mp3',
   },
   {
     id: 'calm',
     arabicName: 'أذان هادئ',
     latinName: 'Calm Adhan',
-    audioUrl: '/api/audio/adhan/calm',
+    audioUrl: 'https://www.islamcan.com/audio/adhan/azan4.mp3',
   },
 ];
 

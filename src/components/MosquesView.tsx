@@ -206,6 +206,103 @@ export const MosquesView: React.FC<MosquesViewProps> = ({
     setCoords({ lat: cityLat, lng: cityLng, label: cityName, isGps: false });
   }, [cityLat, cityLng, cityName]);
 
+  const queryNominatimMosquesDirect = async (
+    lat: number,
+    lng: number,
+    searchRadius: number
+  ): Promise<MosqueItem[] | null> => {
+    const radiusKm = searchRadius / 1000;
+    const latDelta = radiusKm / 111;
+    const cosLat = Math.max(0.2, Math.cos((lat * Math.PI) / 180));
+    const lngDelta = radiusKm / (111 * cosLat);
+    const viewbox = `${(lng - lngDelta).toFixed(5)},${(lat + latDelta).toFixed(5)},${(
+      lng + lngDelta
+    ).toFixed(5)},${(lat - latDelta).toFixed(5)}`;
+
+    const queries = ['مسجد', 'mosque', 'mosquée'];
+    const map = new Map<string, MosqueItem>();
+    let anySucceeded = false;
+
+    await Promise.all(
+      queries.map(async (q) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+          const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
+            q
+          )}&format=jsonv2&limit=25&bounded=1&viewbox=${viewbox}`;
+          const res = await fetch(url, {
+            headers: { Accept: 'application/json' },
+            signal: controller.signal,
+          });
+          clearTimeout(timer);
+          if (!res.ok) return;
+          anySucceeded = true;
+
+          const list = (await res.json()) as Array<{
+            place_id: number;
+            osm_type?: string;
+            osm_id?: number;
+            lat: string;
+            lon: string;
+            category?: string;
+            type?: string;
+            name?: string;
+            display_name?: string;
+          }>;
+
+          for (const place of list) {
+            const isWorship =
+              place.category === 'amenity' ||
+              place.type === 'place_of_worship' ||
+              place.type === 'mosque';
+            if (!isWorship) continue;
+
+            const pLat = Number(place.lat);
+            const pLng = Number(place.lon);
+            if (!Number.isFinite(pLat) || !Number.isFinite(pLng)) continue;
+
+            const rawName = place.name || '';
+            const fullText = `${rawName} ${place.display_name || ''}`;
+            if (
+              /église|church|cathedral|synagogue|temple|chapel|كنيسة|معبد|كاتدرائية/i.test(fullText)
+            ) {
+              continue;
+            }
+
+            const distanceKm = haversineKm(lat, lng, pLat, pLng);
+            if (distanceKm > radiusKm) continue;
+
+            const id = `${place.osm_type || 'osm'}-${place.osm_id || place.place_id}`;
+            if (map.has(id)) continue;
+
+            const displayParts = (place.display_name || '')
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean);
+
+            map.set(id, {
+              id,
+              name: rawName,
+              lat: pLat,
+              lng: pLng,
+              distanceKm,
+              bearing: calculateBearing(lat, lng, pLat, pLng),
+              address: displayParts.slice(1, 3).join(', '),
+            });
+          }
+        } catch {
+          clearTimeout(timer);
+        }
+      })
+    );
+
+    if (!anySucceeded) return null;
+    return Array.from(map.values())
+      .sort((a, b) => a.distanceKm - b.distanceKm)
+      .slice(0, 30);
+  };
+
   const queryMosquesOnce = async (
     lat: number,
     lng: number,
@@ -216,21 +313,13 @@ export const MosquesView: React.FC<MosquesViewProps> = ({
       return { ok: true, items: directItems };
     }
 
-    try {
-      const res = await fetch(`/api/mosques?lat=${lat}&lng=${lng}&radius=${searchRadius}`);
-      const data = (await res.json()) as { mosques?: MosqueItem[] };
-      if (res.ok && Array.isArray(data.mosques)) {
-        if (data.mosques.length > 0) {
-          return { ok: true, items: data.mosques };
-        }
-        return { ok: true, items: [] };
-      }
-    } catch {
-      // fall through
+    const nominatimItems = await queryNominatimMosquesDirect(lat, lng, searchRadius);
+    if (nominatimItems && nominatimItems.length > 0) {
+      return { ok: true, items: nominatimItems };
     }
 
-    if (directItems !== null) {
-      return { ok: true, items: directItems };
+    if (directItems !== null || nominatimItems !== null) {
+      return { ok: true, items: directItems || nominatimItems || [] };
     }
 
     return { ok: false, items: [] };

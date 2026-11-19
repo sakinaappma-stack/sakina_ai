@@ -12,7 +12,7 @@ import type {
   MadhabId,
   MuezzinId,
 } from '../types';
-import { getCalculationParams } from './prayerUtils';
+import { MUEZZINS, getCalculationParams } from './prayerUtils';
 
 export interface StoredDayTimings {
   dateKey: string;
@@ -298,29 +298,46 @@ export async function fetchAndCache30DayCalendar(params: {
   return localCalendar;
 }
 
+function getAdhanPublicUrl(muezzinId: MuezzinId): string {
+  const found = MUEZZINS.find((m) => m.id === muezzinId) || MUEZZINS[0];
+  return found.audioUrl;
+}
+
 export async function cacheSelectedAdhanAudio(muezzinId: MuezzinId): Promise<boolean> {
-  const audioPath = `/api/audio/adhan/${muezzinId}`;
+  const audioUrl = getAdhanPublicUrl(muezzinId);
   try {
     if (!('caches' in window)) return false;
     const cache = await caches.open(ADHAN_AUDIO_CACHE);
-    const existing = await cache.match(audioPath);
+    const existing = await cache.match(audioUrl);
     if (existing) return true;
 
-    const res = await fetch(audioPath);
-    if (!res.ok) return false;
-    await cache.put(audioPath, res.clone());
-    return true;
+    try {
+      const corsRes = await fetch(audioUrl, { mode: 'cors' });
+      if (corsRes.ok) {
+        await cache.put(audioUrl, corsRes.clone());
+        return true;
+      }
+    } catch {
+      // Cross-origin audio servers without ACAO header still support no-cors caching for <audio> / SW playback
+    }
+
+    const opaqueRes = await fetch(audioUrl, { mode: 'no-cors' });
+    if (opaqueRes.type === 'opaque' || opaqueRes.ok) {
+      await cache.put(audioUrl, opaqueRes);
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }
 }
 
 export async function isAdhanAudioCached(muezzinId: MuezzinId): Promise<boolean> {
-  const audioPath = `/api/audio/adhan/${muezzinId}`;
+  const audioUrl = getAdhanPublicUrl(muezzinId);
   try {
     if (!('caches' in window)) return false;
     const cache = await caches.open(ADHAN_AUDIO_CACHE);
-    const existing = await cache.match(audioPath);
+    const existing = await cache.match(audioUrl);
     return Boolean(existing);
   } catch {
     return false;
@@ -330,24 +347,26 @@ export async function isAdhanAudioCached(muezzinId: MuezzinId): Promise<boolean>
 export async function getOfflinePlayableAdhanUrl(
   muezzinId: MuezzinId
 ): Promise<{ url: string; revoke?: () => void }> {
-  const audioPath = `/api/audio/adhan/${muezzinId}`;
+  const audioUrl = getAdhanPublicUrl(muezzinId);
   try {
     if ('caches' in window) {
       const cache = await caches.open(ADHAN_AUDIO_CACHE);
-      const match = await cache.match(audioPath);
-      if (match) {
+      const match = await cache.match(audioUrl);
+      if (match && match.ok && match.type !== 'opaque') {
         const blob = await match.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        return {
-          url: objectUrl,
-          revoke: () => URL.revokeObjectURL(objectUrl),
-        };
+        if (blob.size > 0) {
+          const objectUrl = URL.createObjectURL(blob);
+          return {
+            url: objectUrl,
+            revoke: () => URL.revokeObjectURL(objectUrl),
+          };
+        }
       }
     }
   } catch {
-    // fall through
+    // fall through to direct public URL
   }
-  return { url: audioPath };
+  return { url: audioUrl };
 }
 
 function openIdb(): Promise<IDBDatabase> {
@@ -376,17 +395,6 @@ async function saveNotificationConfigIdb(config: unknown): Promise<void> {
   } catch {
     // ignore IDB error
   }
-}
-
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
 }
 
 export async function syncNotificationsWithSwAndServer(params: {
@@ -421,45 +429,8 @@ export async function syncNotificationsWithSwAndServer(params: {
       type: 'SCHEDULE_PRAYERS',
       payload,
     });
-
-    if (
-      typeof Notification !== 'undefined' &&
-      Notification.permission === 'granted' &&
-      'pushManager' in registration &&
-      navigator.onLine
-    ) {
-      let subscription = await registration.pushManager.getSubscription();
-      if (!subscription) {
-        const keyRes = await fetch('/api/push/vapid-public-key');
-        if (keyRes.ok) {
-          const { publicKey } = (await keyRes.json()) as { publicKey: string };
-          if (publicKey) {
-            const convertedKey = urlBase64ToUint8Array(publicKey);
-            subscription = await registration.pushManager.subscribe({
-              userVisibleOnly: true,
-              applicationServerKey: convertedKey.buffer as ArrayBuffer,
-            });
-          }
-        }
-      }
-
-      if (subscription) {
-        await fetch('/api/push/subscribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            subscription,
-            cityName: params.calendar.cityName,
-            language: params.language,
-            enabledPrayers: params.adhanSettings.enabledPrayers,
-            preAdhanAlert10Min: params.adhanSettings.preAdhanAlert10Min,
-            schedule30Days: compactDays,
-          }),
-        });
-      }
-    }
   } catch {
-    // Push subscription may be restricted in some preview iframes; local SW notifications remain active
+    // Service Worker scheduling unavailable in this preview context
   }
 }
 
@@ -524,10 +495,8 @@ export async function scheduleTestAdhanIn2Min(params: {
   // Ensure Moroccan Adhan MP3 is cached for instant playback
   void cacheSelectedAdhanAudio(muezzin);
 
-  let pushScheduled = false;
-
   if (!('serviceWorker' in navigator)) {
-    return { targetMs, tag, pushScheduled };
+    return { targetMs, tag, pushScheduled: false };
   }
 
   try {
@@ -542,49 +511,9 @@ export async function scheduleTestAdhanIn2Min(params: {
         tag,
       },
     });
-
-    if (
-      typeof Notification !== 'undefined' &&
-      Notification.permission === 'granted' &&
-      'pushManager' in registration &&
-      navigator.onLine
-    ) {
-      let subscription = await registration.pushManager.getSubscription();
-      if (!subscription) {
-        const keyRes = await fetch('/api/push/vapid-public-key');
-        if (keyRes.ok) {
-          const { publicKey } = (await keyRes.json()) as { publicKey: string };
-          if (publicKey) {
-            const convertedKey = urlBase64ToUint8Array(publicKey);
-            subscription = await registration.pushManager.subscribe({
-              userVisibleOnly: true,
-              applicationServerKey: convertedKey.buffer as ArrayBuffer,
-            });
-          }
-        }
-      }
-
-      if (subscription) {
-        const res = await fetch('/api/push/schedule-test', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            subscription,
-            cityName: params.cityName,
-            language: params.language,
-            delaySeconds,
-            muezzin,
-            tag,
-          }),
-        });
-        if (res.ok) {
-          pushScheduled = true;
-        }
-      }
-    }
   } catch {
     // In-app + SW trigger fallback still runs
   }
 
-  return { targetMs, tag, pushScheduled };
+  return { targetMs, tag, pushScheduled: false };
 }

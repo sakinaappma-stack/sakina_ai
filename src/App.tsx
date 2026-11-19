@@ -32,6 +32,12 @@ import {
   showPrayerNotificationViaSw,
   syncNotificationsWithSwAndServer,
 } from './utils/offlineStorage';
+import {
+  getCitiesForCountryClient,
+  getLocalizedCountriesClient,
+  resolveCityCoordinatesClient,
+  reverseGeocodeClient,
+} from './utils/clientLocations';
 import { BottomNav } from './components/BottomNav';
 import { HomeView } from './components/HomeView';
 import { QuranView } from './components/QuranView';
@@ -324,36 +330,24 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Load world countries localized to current language
+  // Load world countries localized to current language (100% client-side)
   useEffect(() => {
-    let active = true;
     setLoadingCountries(true);
-    fetch(`/api/locations/countries?lang=${settings.language}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (!active) return;
-        setCountries(data.countries || []);
-      })
-      .catch(() => {
-        if (!active) return;
-      })
-      .finally(() => {
-        if (active) setLoadingCountries(false);
-      });
-    return () => {
-      active = false;
-    };
+    try {
+      setCountries(getLocalizedCountriesClient(settings.language));
+    } finally {
+      setLoadingCountries(false);
+    }
   }, [settings.language]);
 
-  // Load cities whenever country changes
+  // Load cities whenever country changes (100% client-side)
   useEffect(() => {
     let active = true;
     setLoadingCities(true);
-    fetch(`/api/locations/cities/${settings.countryIso}`)
-      .then((res) => res.json())
-      .then((data) => {
+    getCitiesForCountryClient(settings.countryIso)
+      .then((list) => {
         if (!active) return;
-        setCities(data.cities || []);
+        setCities(list);
       })
       .catch(() => {
         if (!active) return;
@@ -929,9 +923,7 @@ export default function App() {
     const suggestedMethod = suggestCalculationMethodForCountry(country.isoCode);
     setLoadingCities(true);
     try {
-      const res = await fetch(`/api/locations/cities/${country.isoCode}`);
-      const data = await res.json();
-      const list: CityItem[] = data.cities || [];
+      const list = await getCitiesForCountryClient(country.isoCode);
       setCities(list);
 
       const preferred =
@@ -945,15 +937,16 @@ export default function App() {
           : preferred.name
         : country.localizedName;
 
-      const lat = preferred ? preferred.latitude : country.latitude;
-      const lng = preferred ? preferred.longitude : country.longitude;
+      const resolvedCoords = preferred
+        ? await resolveCityCoordinatesClient(preferred, country.isoCode)
+        : { lat: country.latitude, lng: country.longitude };
 
       setSettings((prev) => ({
         ...prev,
         countryIso: country.isoCode,
         cityName: displayCity,
-        cityLat: lat,
-        cityLng: lng,
+        cityLat: resolvedCoords.lat,
+        cityLng: resolvedCoords.lng,
         calculationMethod: suggestedMethod,
       }));
     } catch {
@@ -977,13 +970,14 @@ export default function App() {
     const countryEnglish =
       settings.countryIso === 'MA' ? 'Morocco' : selectedCountry?.name || 'Morocco';
 
-    const nextCityKey = `${displayCity}|${city.latitude.toFixed(2)}|${city.longitude.toFixed(2)}`;
+    const resolvedCoords = await resolveCityCoordinatesClient(city, settings.countryIso);
+    const nextCityKey = `${displayCity}|${resolvedCoords.lat.toFixed(2)}|${resolvedCoords.lng.toFixed(2)}`;
 
     setSettings((prev) => ({
       ...prev,
       cityName: displayCity,
-      cityLat: city.latitude,
-      cityLng: city.longitude,
+      cityLat: resolvedCoords.lat,
+      cityLng: resolvedCoords.lng,
     }));
 
     const byCityTimings = await fetchAladhanByCity(
@@ -994,6 +988,18 @@ export default function App() {
     );
     if (byCityTimings) {
       setAladhanTimings(byCityTimings);
+      if (
+        typeof byCityTimings.latitude === 'number' &&
+        typeof byCityTimings.longitude === 'number' &&
+        Number.isFinite(byCityTimings.latitude) &&
+        Number.isFinite(byCityTimings.longitude)
+      ) {
+        setSettings((prev) => ({
+          ...prev,
+          cityLat: byCityTimings.latitude!,
+          cityLng: byCityTimings.longitude!,
+        }));
+      }
     }
   };
 
@@ -1024,21 +1030,13 @@ export default function App() {
           const timestamp = Math.floor(Date.now() / 1000);
           const aladhanUrl = `https://api.aladhan.com/v1/timings/${timestamp}?latitude=${lat}&longitude=${lng}&method=5`;
 
-          const [revRes, aladhanRawRes] = await Promise.all([
-            fetch(`/api/locations/reverse?lat=${lat}&lng=${lng}&lang=${settings.language}`).catch(
-              () => null
-            ),
+          const [revData, aladhanRawRes] = await Promise.all([
+            reverseGeocodeClient(lat, lng, settings.language).catch(() => null),
             fetch(aladhanUrl).catch(() => null),
           ]);
 
-          let resolvedCityName = '';
-          let resolvedCountryIso = settings.countryIso;
-
-          if (revRes && revRes.ok) {
-            const revData = await revRes.json();
-            resolvedCityName = revData.cityName || '';
-            resolvedCountryIso = revData.countryIso || resolvedCountryIso;
-          }
+          let resolvedCityName = revData?.cityName || '';
+          const resolvedCountryIso = revData?.countryIso || settings.countryIso;
 
           let parsedAladhan: AladhanTimings | null = null;
           if (aladhanRawRes && aladhanRawRes.ok) {

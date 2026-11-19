@@ -22,6 +22,56 @@ interface QuranViewProps {
   t: UITranslation;
 }
 
+const QURAN_EDITIONS: Record<string, string> = {
+  ar: 'ar.muyassar',
+  en: 'en.sahih',
+  fr: 'fr.hamidullah',
+  tr: 'tr.diyanet',
+  ur: 'ur.jalandhry',
+  id: 'id.indonesian',
+  es: 'es.cortes',
+  ms: 'ms.basmeih',
+  de: 'de.bubenheim',
+  fa: 'fa.makarem',
+  ru: 'ru.kuliev',
+  bn: 'bn.bengali',
+  hi: 'hi.hindi',
+  zh: 'zh.jian',
+  ja: 'ja.japanese',
+  ko: 'ko.korean',
+  it: 'it.piccardo',
+  pt: 'pt.elhayek',
+  nl: 'nl.keyzer',
+  sv: 'sv.bernstrom',
+  pl: 'pl.bielawskiego',
+  so: 'so.abduh',
+  sw: 'sw.barwani',
+  uz: 'uz.sodik',
+  az: 'az.mammadaliyev',
+  bs: 'bs.korkut',
+  sq: 'sq.nahi',
+  ha: 'ha.gumi',
+  th: 'th.thai',
+  ta: 'ta.tamil',
+  ml: 'ml.abdulhameed',
+  ug: 'ug.saleh',
+  tg: 'tg.ayati',
+  dv: 'dv.divehi',
+  cs: 'cs.hrbek',
+  ro: 'ro.grigore',
+  bg: 'bg.theophanov',
+  no: 'no.berg',
+  ku: 'ku.asan',
+  am: 'am.sadiq',
+  sd: 'sd.amroti',
+  ps: 'ps.abdulwali',
+};
+
+function resolveQuranEdition(lang: LanguageCode): string {
+  const cleaned = String(lang || 'ar').trim().toLowerCase();
+  return QURAN_EDITIONS[cleaned] || QURAN_EDITIONS[cleaned.split('-')[0]] || 'en.sahih';
+}
+
 export const QuranView: React.FC<QuranViewProps> = ({
   language,
   fontSize,
@@ -52,12 +102,42 @@ export const QuranView: React.FC<QuranViewProps> = ({
   const loadSurahs = async () => {
     setLoadingList(true);
     setListError(null);
+
+    const cacheKey = 'sakina_quran_surahs_v1';
     try {
-      const res = await fetch('/api/quran/surahs');
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to load surahs');
-      setSurahs(data.surahs || []);
+      const cachedRaw = localStorage.getItem(cacheKey);
+      if (cachedRaw) {
+        const parsed = JSON.parse(cachedRaw) as { data?: SurahMeta[] };
+        if (Array.isArray(parsed.data) && parsed.data.length === 114) {
+          setSurahs(parsed.data);
+          setLoadingList(false);
+          return;
+        }
+      }
+    } catch {
+      // ignore storage read failure
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    try {
+      const res = await fetch('https://api.alquran.cloud/v1/surah', {
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`Quran API error (${res.status})`);
+      const json = (await res.json()) as { data?: SurahMeta[] };
+      if (!Array.isArray(json.data) || json.data.length === 0) {
+        throw new Error(t.quran.errorLoad);
+      }
+      setSurahs(json.data);
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify({ data: json.data }));
+      } catch {
+        // ignore quota error
+      }
     } catch (err) {
+      clearTimeout(timer);
       setListError(err instanceof Error ? err.message : t.quran.errorLoad);
     } finally {
       setLoadingList(false);
@@ -71,12 +151,84 @@ export const QuranView: React.FC<QuranViewProps> = ({
   const loadSurahDetail = async (num: number, lang: LanguageCode) => {
     setLoadingSurah(true);
     setSurahError(null);
+
+    const edition = resolveQuranEdition(lang);
+    const cacheKey = `sakina_quran_surah_${num}_${edition}_v1`;
     try {
-      const res = await fetch(`/api/quran/surah/${num}?lang=${lang}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || t.quran.errorLoad);
-      setSurahDetail(data);
+      const cachedRaw = localStorage.getItem(cacheKey);
+      if (cachedRaw) {
+        const parsed = JSON.parse(cachedRaw) as SurahDetail;
+        if (parsed && Array.isArray(parsed.ayahs) && parsed.ayahs.length > 0) {
+          setSurahDetail(parsed);
+          setLoadingSurah(false);
+          return;
+        }
+      }
+    } catch {
+      // ignore cache read error
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+      const url = `https://api.alquran.cloud/v1/surah/${num}/editions/quran-uthmani,${edition}`;
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`Quran API error (${res.status})`);
+      const json = (await res.json()) as {
+        data?: Array<{
+          number: number;
+          name: string;
+          englishName: string;
+          englishNameTranslation: string;
+          revelationType: string;
+          numberOfAyahs: number;
+          edition: { identifier: string; name: string; language: string };
+          ayahs: Array<{
+            number: number;
+            text: string;
+            numberInSurah: number;
+            juz: number;
+            page: number;
+          }>;
+        }>;
+      };
+
+      if (!Array.isArray(json.data) || json.data.length < 2) {
+        throw new Error(t.quran.errorLoad);
+      }
+
+      const arabicEdition = json.data[0];
+      const translatedEdition = json.data[1];
+      const pad3 = String(num).padStart(3, '0');
+
+      const detail: SurahDetail = {
+        number: arabicEdition.number,
+        name: arabicEdition.name,
+        englishName: arabicEdition.englishName,
+        englishNameTranslation: arabicEdition.englishNameTranslation,
+        revelationType: arabicEdition.revelationType,
+        numberOfAyahs: arabicEdition.numberOfAyahs,
+        editionName: translatedEdition.edition?.name || edition,
+        audioUrl: `https://server8.mp3quran.net/afs/${pad3}.mp3`,
+        ayahs: arabicEdition.ayahs.map((ayah, idx) => ({
+          number: ayah.number,
+          numberInSurah: ayah.numberInSurah,
+          juz: ayah.juz,
+          page: ayah.page,
+          arabicText: ayah.text,
+          translatedText: translatedEdition.ayahs[idx]?.text || '',
+        })),
+      };
+
+      setSurahDetail(detail);
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(detail));
+      } catch {
+        // ignore quota error
+      }
     } catch (err) {
+      clearTimeout(timer);
       setSurahError(err instanceof Error ? err.message : t.quran.errorLoad);
     } finally {
       setLoadingSurah(false);

@@ -115,7 +115,8 @@ registerRoute(
 
 // Cache selected Adhan audio locally for full offline Adhan playback
 registerRoute(
-  ({ url }) => url.pathname.startsWith('/api/audio/adhan/'),
+  ({ url }) =>
+    url.origin === 'https://www.islamcan.com' && url.pathname.startsWith('/audio/adhan/'),
   new CacheFirst({
     cacheName: 'sakina-adhan-audio-v1',
     plugins: [
@@ -125,9 +126,12 @@ registerRoute(
   })
 );
 
-// Cache countries & cities offline
+// Cache countries, cities & geocoding offline
 registerRoute(
-  ({ url }) => url.pathname.startsWith('/api/locations/'),
+  ({ url }) =>
+    url.origin === 'https://countriesnow.space' ||
+    url.origin === 'https://nominatim.openstreetmap.org' ||
+    url.origin === 'https://geocoding-api.open-meteo.com',
   new StaleWhileRevalidate({
     cacheName: 'sakina-locations-v1',
     plugins: [
@@ -139,7 +143,7 @@ registerRoute(
 
 // Cache Quran Surah list and visited Surahs offline
 registerRoute(
-  ({ url }) => url.pathname.startsWith('/api/quran/'),
+  ({ url }) => url.origin === 'https://api.alquran.cloud',
   new NetworkFirst({
     cacheName: 'sakina-quran-v1',
     networkTimeoutSeconds: 4,
