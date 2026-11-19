@@ -1,4 +1,5 @@
-export type LanguageCode = 'ar' | 'en' | 'fr' | 'tr' | 'ur' | 'id' | 'es';
+export type CoreLanguageCode = 'ar' | 'en' | 'fr' | 'tr' | 'ur' | 'id' | 'es';
+export type LanguageCode = string;
 
 export type TabId =
   | 'home'
@@ -28,6 +29,8 @@ export type MadhabId = 'shafi' | 'hanafi';
 export type ReciterId = 'alafasy' | 'maher' | 'basit' | 'ghamdi' | 'dosari';
 
 export type MuezzinId = 'moroccan' | 'makkah' | 'madinah' | 'calm';
+
+export type SakinaAiVoice = 'woman' | 'man';
 
 export type AdhanPrayerKey = 'fajr' | 'dhuhr' | 'asr' | 'maghrib' | 'isha';
 
@@ -107,8 +110,10 @@ export interface MosqueItem {
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
-  text: string;
-  audioBase64?: string;
+  text?: string;
+  audioUrl?: string;
+  audioDurationSec?: number;
+  waveform?: number[];
 }
 
 export interface AppSettings {
@@ -123,5 +128,6 @@ export interface AppSettings {
   use24Hour: boolean;
   quranFontSize: number;
   reciterId: ReciterId;
+  aiVoice: SakinaAiVoice;
   adhan: AdhanSettings;
 }

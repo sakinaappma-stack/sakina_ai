@@ -18,7 +18,7 @@ import type {
   PrayerKey,
   PrayerScheduleItem,
 } from '../types';
-import { LANGUAGES, type UITranslation } from '../i18n/translations';
+import { getLanguageMeta, LANGUAGES, type UITranslation } from '../i18n/translations';
 import { formatHumanCountdown } from '../utils/prayerUtils';
 import { NotificationPermissionBanner, PWAInstallButton } from './PWAControls';
 
@@ -291,7 +291,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               className="flex items-center justify-between text-xs font-medium text-[#436155] dark:text-[#9EC0B2]"
             >
               <span>{t.home.selectLanguage}</span>
-              <span>{LANGUAGES.find((l) => l.code === settings.language)?.quranEditionLabel}</span>
+              <span>{getLanguageMeta(settings.language).quranEditionLabel}</span>
             </label>
             <div className="relative">
               <Globe className="w-4 h-4 text-[#0B4F3A] dark:text-[#E5C366] pointer-events-none absolute top-1/2 -translate-y-1/2 start-3.5" />
@@ -301,6 +301,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onChange={(e) => onSelectLanguage(e.target.value as LanguageCode)}
                 className="w-full min-h-[48px] ps-10 pe-9 py-2.5 rounded-xl bg-[#F8FAF7] dark:bg-[#113529] border border-[#DCE7E0] dark:border-[#1C4B3B] hover:border-[#0B4F3A] dark:hover:border-[#E5C366] font-semibold text-sm sm:text-base text-[#0A251C] dark:text-[#F2F7F4] appearance-none cursor-pointer focus-visible:outline-2 focus-visible:outline-[#C59B38]"
               >
+                {!LANGUAGES.some((l) => l.code === settings.language) && (
+                  <option value={settings.language}>
+                    {getLanguageMeta(settings.language).nativeName}
+                  </option>
+                )}
                 {LANGUAGES.map((lang) => (
                   <option key={lang.code} value={lang.code}>
                     {lang.nativeName}

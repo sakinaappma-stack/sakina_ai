@@ -1,4 +1,4 @@
-import type { LanguageCode } from '../types';
+import type { CoreLanguageCode } from '../types';
 
 export type AdhkarCategoryId = 'morning' | 'evening' | 'afterPrayer' | 'sleep' | 'quranicDuas';
 
@@ -8,7 +8,7 @@ export interface DhikrItem {
   arabic: string;
   count: number;
   source: string;
-  translations: Record<Exclude<LanguageCode, 'ar'>, string>;
+  translations: Record<Exclude<CoreLanguageCode, 'ar'>, string>;
 }
 
 export const ADHKAR_ITEMS: DhikrItem[] = [

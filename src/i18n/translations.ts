@@ -1,7 +1,8 @@
-import type { AdhanPrayerKey, CalculationMethodId, LanguageCode, PrayerKey, TabId } from '../types';
+import type { AdhanPrayerKey, CalculationMethodId, CoreLanguageCode, PrayerKey, TabId } from '../types';
+import { getQuranEditionLabel, getWorldLanguageByCode, resolveCoreLang } from './worldLanguages';
 
 export interface LanguageOption {
-  code: LanguageCode;
+  code: CoreLanguageCode;
   nativeName: string;
   dir: 'rtl' | 'ltr';
   quranEditionLabel: string;
@@ -158,6 +159,27 @@ export interface UITranslation {
     preAdhanDesc: string;
     enabledLabel: string;
     disabledLabel: string;
+    displayAndPrayerTitle: string;
+    languageSectionTitle: string;
+    languageSearchPlaceholder: string;
+    worldLanguagesCount: string;
+    changeLanguageBtn: string;
+    aboutTitle: string;
+    aboutDescription: string;
+    aboutFeatures: string[];
+    supportTitle: string;
+    supportDescription: string;
+    supportBtn: string;
+    supportShareBtn: string;
+    supportCopyLinkBtn: string;
+    supportCopiedLabel: string;
+    supportContactBtn: string;
+    supportDuaNote: string;
+    closeLabel: string;
+    aiVoiceTitle: string;
+    aiVoiceSubtitle: string;
+    aiVoiceWoman: string;
+    aiVoiceMan: string;
     adhanPrayers: Record<AdhanPrayerKey, string>;
     methods: Record<CalculationMethodId, string>;
   };
@@ -181,7 +203,7 @@ export interface UITranslation {
   };
 }
 
-export const TRANSLATIONS: Record<LanguageCode, UITranslation> = {
+export const TRANSLATIONS: Record<CoreLanguageCode, UITranslation> = {
   ar: {
     appName: 'السكينة AI',
     subtitle: 'ذكاء اصطناعي - رفيقك للطمأنينة',
@@ -351,6 +373,34 @@ export const TRANSLATIONS: Record<LanguageCode, UITranslation> = {
       preAdhanDesc: 'إصدار تنبيه صوتي هادئ وإشعار قبل دخول وقت الصلاة بـ 10 دقائق',
       enabledLabel: 'مفعّل',
       disabledLabel: 'معطّل',
+      displayAndPrayerTitle: 'المظهر وحساب المواقيت',
+      languageSectionTitle: 'اللغة',
+      languageSearchPlaceholder: 'ابحث عن أي لغة في العالم...',
+      worldLanguagesCount: 'لغة عالمية',
+      changeLanguageBtn: 'تغيير اللغة',
+      aboutTitle: 'حول التطبيق',
+      aboutDescription: 'السكينة AI تطبيق إسلامي شامل صُمم ليكون رفيقك اليومي للطمأنينة والعبادة أينما كنت، ويعمل حتى بدون إنترنت.',
+      aboutFeatures: [
+        'مواقيت الصلاة لجميع دول ومدن العالم مع حفظ 30 يوماً بدون إنترنت',
+        'تنبيهات الأذان بأصوات متعددة (المغربي، الحرم، النبوي، هادئ) وتنبيه قبل 10 دقائق',
+        'القرآن الكريم كاملاً مع التفسير الميسر وتلاوات نخبة من القراء',
+        'أذكار الصباح والمساء وبعد الصلاة والنوم والسبحة الإلكترونية',
+        'بوصلة القبلة المباشرة وخريطة أقرب المساجد إليك',
+        'رفيق سكينة AI للمحادثة الصوتية المباشرة بالصوت وبالنص',
+      ],
+      supportTitle: 'دعم التطبيق',
+      supportDescription: 'ساهم في استمرار تطوير السكينة AI ونشره كصدقة جارية تعم بها الفائدة.',
+      supportBtn: 'ادعم التطبيق',
+      supportShareBtn: 'مشاركة التطبيق مع الأهل والأصدقاء',
+      supportCopyLinkBtn: 'نسخ رابط التطبيق',
+      supportCopiedLabel: 'تم نسخ الرابط!',
+      supportContactBtn: 'تواصل معنا لدعم المشروع',
+      supportDuaNote: 'جزاكم الله خيراً على دعمكم ودعائكم.',
+      closeLabel: 'إغلاق',
+      aiVoiceTitle: 'صوت سكينة AI',
+      aiVoiceSubtitle: 'اختر الصوت الذي تجيبك به سكينة AI',
+      aiVoiceWoman: 'صوت امرأة',
+      aiVoiceMan: 'صوت رجل',
       adhanPrayers: {
         fajr: 'الفجر',
         dhuhr: 'الظهر',
@@ -558,6 +608,34 @@ export const TRANSLATIONS: Record<LanguageCode, UITranslation> = {
       preAdhanDesc: 'Play a gentle chime 10 minutes before each enabled prayer time',
       enabledLabel: 'On',
       disabledLabel: 'Off',
+      displayAndPrayerTitle: 'Display & Prayer Calculation',
+      languageSectionTitle: 'Language',
+      languageSearchPlaceholder: 'Search any world language...',
+      worldLanguagesCount: 'world languages',
+      changeLanguageBtn: 'Change',
+      aboutTitle: 'About the App',
+      aboutDescription: 'Sakina AI is a complete Islamic companion designed for daily serenity and worship, with full offline support for prayer times and Adhan.',
+      aboutFeatures: [
+        'Worldwide prayer times with 30-day offline schedule caching',
+        'Adhan alerts (Moroccan, Makkah, Madinah, Calm) plus 10-minute pre-prayer chime',
+        'The Noble Quran with verse translations and audio recitations',
+        'Daily Adhkar (Morning, Evening, After Prayer, Sleep) and Digital Tasbih',
+        'Live Qibla compass and interactive Nearest Mosques map',
+        'Sakina AI direct voice-to-voice and text companion',
+      ],
+      supportTitle: 'Support the App',
+      supportDescription: 'Help keep Sakina AI growing and share the benefit with others.',
+      supportBtn: 'Support the App',
+      supportShareBtn: 'Share App with Family & Friends',
+      supportCopyLinkBtn: 'Copy App Link',
+      supportCopiedLabel: 'Link copied!',
+      supportContactBtn: 'Contact Support Team',
+      supportDuaNote: 'Thank you for your support and prayers.',
+      closeLabel: 'Close',
+      aiVoiceTitle: 'Sakina AI Voice',
+      aiVoiceSubtitle: 'Choose the voice Sakina AI uses to answer you',
+      aiVoiceWoman: 'Woman voice',
+      aiVoiceMan: 'Man voice',
       adhanPrayers: {
         fajr: 'Fajr',
         dhuhr: 'Dhuhr',
@@ -765,6 +843,34 @@ export const TRANSLATIONS: Record<LanguageCode, UITranslation> = {
       preAdhanDesc: 'Alerte douce 10 minutes avant chaque prière activée',
       enabledLabel: 'Activé',
       disabledLabel: 'Désactivé',
+      displayAndPrayerTitle: 'Affichage et calcul des prières',
+      languageSectionTitle: 'Langue',
+      languageSearchPlaceholder: 'Rechercher une langue du monde...',
+      worldLanguagesCount: 'langues du monde',
+      changeLanguageBtn: 'Changer',
+      aboutTitle: 'À propos de l’application',
+      aboutDescription: 'Sakina AI est votre compagnon islamique complet pour la sérénité quotidienne, avec fonctionnement hors ligne pour les prières et l’Adhan.',
+      aboutFeatures: [
+        'Horaires de prière mondiaux avec sauvegarde hors ligne sur 30 jours',
+        'Alertes Adhan (Marocain, La Mecque, Médine, Calme) et rappel 10 min avant',
+        'Le Noble Coran avec traductions et récitations audio',
+        'Adhkar quotidiens et Tasbih numérique',
+        'Boussole Qibla en direct et carte des mosquées proches',
+        'Assistant vocal et écrit Sakina AI en direct',
+      ],
+      supportTitle: 'Soutenir l’application',
+      supportDescription: 'Aidez à faire connaître et évoluer Sakina AI auprès de votre entourage.',
+      supportBtn: 'Soutenir l’application',
+      supportShareBtn: 'Partager l’application',
+      supportCopyLinkBtn: 'Copier le lien',
+      supportCopiedLabel: 'Lien copié !',
+      supportContactBtn: 'Contacter l’équipe',
+      supportDuaNote: 'Merci pour votre soutien et vos invocations.',
+      closeLabel: 'Fermer',
+      aiVoiceTitle: 'Voix de Sakina AI',
+      aiVoiceSubtitle: 'Choisissez la voix avec laquelle Sakina AI vous répond',
+      aiVoiceWoman: 'Voix de femme',
+      aiVoiceMan: 'Voix d’homme',
       adhanPrayers: {
         fajr: 'Fajr',
         dhuhr: 'Dhuhr',
@@ -972,6 +1078,34 @@ export const TRANSLATIONS: Record<LanguageCode, UITranslation> = {
       preAdhanDesc: 'Her namaz vaktinden 10 dakika önce nazik uyarı sesi çal',
       enabledLabel: 'Açık',
       disabledLabel: 'Kapalı',
+      displayAndPrayerTitle: 'Görünüm ve Vakit Hesaplama',
+      languageSectionTitle: 'Dil',
+      languageSearchPlaceholder: 'Dünya dillerinden ara...',
+      worldLanguagesCount: 'dünya dili',
+      changeLanguageBtn: 'Değiştir',
+      aboutTitle: 'Uygulama Hakkında',
+      aboutDescription: 'Sakina AI, günlük ibadet ve huzur için çevrimdışı namaz vakitleri ve ezan desteği sunan kapsamlı bir İslami yol arkadaşıdır.',
+      aboutFeatures: [
+        '30 günlük çevrimdışı önbellekli dünya geneli namaz vakitleri',
+        'Çoklu müezzin sesi ve 10 dakika öncesi ezan hatırlatıcısı',
+        'Mealli ve sesli tilavetli Kur’an-ı Kerim',
+        'Günlük zikirler, dualar ve dijital tesbih',
+        'Canlı Kıble pusulası ve en yakın camiler haritası',
+        'Sesli ve yazılı canlı Sakina AI rehberi',
+      ],
+      supportTitle: 'Uygulamayı Destekle',
+      supportDescription: 'Sakina AI’nin gelişmesine ve daha fazla kişiye ulaşmasına katkıda bulunun.',
+      supportBtn: 'Uygulamayı Destekle',
+      supportShareBtn: 'Uygulamayı Paylaş',
+      supportCopyLinkBtn: 'Bağlantıyı Kopyala',
+      supportCopiedLabel: 'Bağlantı kopyalandı!',
+      supportContactBtn: 'Destek Ekibiyle İletişim',
+      supportDuaNote: 'Desteğiniz ve dualarınız için teşekkür ederiz.',
+      closeLabel: 'Kapat',
+      aiVoiceTitle: 'Sakina AI Sesi',
+      aiVoiceSubtitle: 'Sakina AI’nin sizi yanıtlayacağı sesi seçin',
+      aiVoiceWoman: 'Kadın sesi',
+      aiVoiceMan: 'Erkek sesi',
       adhanPrayers: {
         fajr: 'Sabah',
         dhuhr: 'Öğle',
@@ -1179,6 +1313,34 @@ export const TRANSLATIONS: Record<LanguageCode, UITranslation> = {
       preAdhanDesc: 'ہر فعال نماز سے 10 منٹ پہلے ہلکی گھنٹی بجائیں',
       enabledLabel: 'آن',
       disabledLabel: 'آف',
+      displayAndPrayerTitle: 'ظاہری شکل اور حساب',
+      languageSectionTitle: 'زبان',
+      languageSearchPlaceholder: 'دنیا کی کوئی بھی زبان تلاش کریں...',
+      worldLanguagesCount: 'عالمی زبانیں',
+      changeLanguageBtn: 'تبدیل کریں',
+      aboutTitle: 'ایپ کے بارے میں',
+      aboutDescription: 'سکینہ AI ایک جامع اسلامی ساتھی ہے جو آف لائن نماز کے اوقات، اذان، قرآن، اذکار اور قبلہ رہنمائی فراہم کرتا ہے۔',
+      aboutFeatures: [
+        'دنیا بھر کے لیے نماز کے اوقات اور 30 دن کا آف لائن محفوظ ڈیٹا',
+        'مختلف آوازوں میں اذان اور نماز سے 10 منٹ پہلے یاددہانی',
+        'قرآنِ مجید مع ترجمہ و تلاوت',
+        'مسنون اذکار، دعائیں اور ڈیجیٹل تسبیح',
+        'لائیو قبلہ کمپاس اور قریبی مساجد کا نقشہ',
+        'براہِ راست صوتی اور تحریری سکینہ AI ساتھی',
+      ],
+      supportTitle: 'ایپ کی معاونت کریں',
+      supportDescription: 'سکینہ AI کی ترقی اور صدقہ جاریہ کے طور پر اسے دوسروں تک پہنچانے میں مدد کریں۔',
+      supportBtn: 'ایپ کی معاونت کریں',
+      supportShareBtn: 'دوستوں اور اہلِ خانہ کے ساتھ شیئر کریں',
+      supportCopyLinkBtn: 'ایپ کا لنک کاپی کریں',
+      supportCopiedLabel: 'لنک کاپی ہو گیا!',
+      supportContactBtn: 'تعاون کے لیے رابطہ کریں',
+      supportDuaNote: 'آپ کی معاونت اور دعاؤں کا بہت شکریہ۔',
+      closeLabel: 'بند کریں',
+      aiVoiceTitle: 'سکینہ AI کی آواز',
+      aiVoiceSubtitle: 'وہ آواز منتخب کریں جس میں سکینہ AI جواب دے',
+      aiVoiceWoman: 'خاتون کی آواز',
+      aiVoiceMan: 'مرد کی آواز',
       adhanPrayers: {
         fajr: 'فجر',
         dhuhr: 'ظہر',
@@ -1386,6 +1548,34 @@ export const TRANSLATIONS: Record<LanguageCode, UITranslation> = {
       preAdhanDesc: 'Bunyikan nada lembut 10 menit sebelum waktu sholat',
       enabledLabel: 'Aktif',
       disabledLabel: 'Mati',
+      displayAndPrayerTitle: 'Tampilan & Perhitungan Sholat',
+      languageSectionTitle: 'Bahasa',
+      languageSearchPlaceholder: 'Cari bahasa di dunia...',
+      worldLanguagesCount: 'bahasa dunia',
+      changeLanguageBtn: 'Ubah',
+      aboutTitle: 'Tentang Aplikasi',
+      aboutDescription: 'Sakina AI adalah aplikasi pendamping Islami lengkap untuk ibadah harian dengan dukungan jadwal sholat dan adzan secara offline.',
+      aboutFeatures: [
+        'Jadwal sholat seluruh dunia dengan penyimpanan offline 30 hari',
+        'Notifikasi adzan beragam suara & pengingat 10 menit sebelumnya',
+        'Al-Quran lengkap dengan terjemahan dan murottal audio',
+        'Dzikir harian dan Tasbih digital',
+        'Kompas Kiblat langsung & peta masjid terdekat',
+        'Asisten suara langsung dan obrolan Sakina AI',
+      ],
+      supportTitle: 'Dukung Aplikasi',
+      supportDescription: 'Bantu dukung pengembangan Sakina AI dan bagikan manfaatnya kepada sesama.',
+      supportBtn: 'Dukung Aplikasi',
+      supportShareBtn: 'Bagikan Aplikasi',
+      supportCopyLinkBtn: 'Salin Tautan',
+      supportCopiedLabel: 'Tautan disalin!',
+      supportContactBtn: 'Hubungi Tim Dukungan',
+      supportDuaNote: 'Terima kasih atas dukungan dan doa Anda.',
+      closeLabel: 'Tutup',
+      aiVoiceTitle: 'Suara Sakina AI',
+      aiVoiceSubtitle: 'Pilih suara yang digunakan Sakina AI untuk menjawab Anda',
+      aiVoiceWoman: 'Suara wanita',
+      aiVoiceMan: 'Suara pria',
       adhanPrayers: {
         fajr: 'Subuh',
         dhuhr: 'Dzuhur',
@@ -1593,6 +1783,34 @@ export const TRANSLATIONS: Record<LanguageCode, UITranslation> = {
       preAdhanDesc: 'Reproducir un sonido suave 10 minutos antes de cada oración',
       enabledLabel: 'Activo',
       disabledLabel: 'Inactivo',
+      displayAndPrayerTitle: 'Pantalla y cálculo de oración',
+      languageSectionTitle: 'Idioma',
+      languageSearchPlaceholder: 'Buscar cualquier idioma del mundo...',
+      worldLanguagesCount: 'idiomas del mundo',
+      changeLanguageBtn: 'Cambiar',
+      aboutTitle: 'Acerca de la aplicación',
+      aboutDescription: 'Sakina AI es un compañero islámico completo diseñado para tu serenidad diaria, con horarios de oración y Adhan disponibles sin conexión.',
+      aboutFeatures: [
+        'Horarios de oración mundiales guardados 30 días sin conexión',
+        'Alertas del Adhan y aviso previo de 10 minutos',
+        'El Noble Corán con traducciones y recitaciones de audio',
+        'Adhkar diarios y Tasbih digital',
+        'Brújula de la Alquibla en vivo y mapa de mezquitas cercanas',
+        'Asistente directo por voz y chat Sakina AI',
+      ],
+      supportTitle: 'Apoyar la aplicación',
+      supportDescription: 'Ayuda a que Sakina AI siga creciendo y comparte sus beneficios con los demás.',
+      supportBtn: 'Apoyar la aplicación',
+      supportShareBtn: 'Compartir aplicación',
+      supportCopyLinkBtn: 'Copiar enlace',
+      supportCopiedLabel: '¡Enlace copiado!',
+      supportContactBtn: 'Contactar con soporte',
+      supportDuaNote: 'Gracias por tu apoyo y tus oraciones.',
+      closeLabel: 'Cerrar',
+      aiVoiceTitle: 'Voz de Sakina AI',
+      aiVoiceSubtitle: 'Elige la voz con la que responde Sakina AI',
+      aiVoiceWoman: 'Voz de mujer',
+      aiVoiceMan: 'Voz de hombre',
       adhanPrayers: {
         fajr: 'Fajr',
         dhuhr: 'Dhuhr',
@@ -1634,3 +1852,19 @@ export const TRANSLATIONS: Record<LanguageCode, UITranslation> = {
     },
   },
 };
+
+export function getUiTranslation(lang: string): UITranslation {
+  return TRANSLATIONS[resolveCoreLang(lang)] || TRANSLATIONS.en;
+}
+
+export function getLanguageMeta(code: string) {
+  const core = resolveCoreLang(code);
+  const world = getWorldLanguageByCode(code, code);
+  const coreOpt = LANGUAGES.find((l) => l.code === core) || LANGUAGES[1];
+  return {
+    code,
+    nativeName: world.nativeName,
+    dir: (core === 'ar' || core === 'ur' ? 'rtl' : 'ltr') as 'rtl' | 'ltr',
+    quranEditionLabel: getQuranEditionLabel(code) || coreOpt.quranEditionLabel,
+  };
+}

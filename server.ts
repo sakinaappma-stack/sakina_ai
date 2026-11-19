@@ -1,12 +1,14 @@
 import express from 'express';
+import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { Country, City } from 'country-state-city';
 import { createRequire } from 'module';
 import type * as WebPushType from 'web-push';
+import { WebSocketServer, WebSocket } from 'ws';
 import {
   buildAndroidProjectEntries,
   buildZipBuffer,
@@ -32,10 +34,27 @@ const ai = new GoogleGenAI({
   },
 });
 
-const SUPPORTED_LANGS = ['ar', 'en', 'fr', 'tr', 'ur', 'id', 'es'] as const;
-type Lang = (typeof SUPPORTED_LANGS)[number];
+const liveAi = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  apiVersion: 'v1beta',
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
+    },
+  },
+});
 
-const QURAN_EDITIONS: Record<Lang, string> = {
+type Lang = string;
+
+function normalizeWorldLang(raw: unknown, fallback = 'ar'): string {
+  const cleaned = String(raw || '').trim().toLowerCase();
+  if (/^[a-z]{2,3}(-[a-z0-9]{2,4})?$/i.test(cleaned)) {
+    return cleaned;
+  }
+  return fallback;
+}
+
+const QURAN_EDITIONS: Record<string, string> = {
   ar: 'ar.muyassar',
   en: 'en.sahih',
   fr: 'fr.hamidullah',
@@ -43,6 +62,41 @@ const QURAN_EDITIONS: Record<Lang, string> = {
   ur: 'ur.jalandhry',
   id: 'id.indonesian',
   es: 'es.cortes',
+  ms: 'ms.basmeih',
+  de: 'de.bubenheim',
+  fa: 'fa.makarem',
+  ru: 'ru.kuliev',
+  bn: 'bn.bengali',
+  hi: 'hi.hindi',
+  zh: 'zh.jian',
+  ja: 'ja.japanese',
+  ko: 'ko.korean',
+  it: 'it.piccardo',
+  pt: 'pt.elhayek',
+  nl: 'nl.keyzer',
+  sv: 'sv.bernstrom',
+  pl: 'pl.bielawskiego',
+  so: 'so.abduh',
+  sw: 'sw.barwani',
+  uz: 'uz.sodik',
+  az: 'az.mammadaliyev',
+  bs: 'bs.korkut',
+  sq: 'sq.nahi',
+  ha: 'ha.gumi',
+  th: 'th.thai',
+  ta: 'ta.tamil',
+  ml: 'ml.abdulhameed',
+  ug: 'ug.saleh',
+  tg: 'tg.ayati',
+  dv: 'dv.divehi',
+  cs: 'cs.hrbek',
+  ro: 'ro.grigore',
+  bg: 'bg.theophanov',
+  no: 'no.berg',
+  ku: 'ku.asan',
+  am: 'am.sadiq',
+  sd: 'sd.amroti',
+  ps: 'ps.abdulwali',
 };
 
 const MOROCCO_MAJOR_CITIES: Array<{
@@ -78,35 +132,51 @@ const MOROCCO_MAJOR_CITIES: Array<{
   { name: 'Dakhla', arabicName: 'الداخلة', latitude: 23.6848, longitude: -15.958, stateCode: 'DAK' },
 ];
 
-const displayNameFormatters: Record<Lang, Intl.DisplayNames | null> = {
-  ar: null,
-  en: null,
-  fr: null,
-  tr: null,
-  ur: null,
-  id: null,
-  es: null,
-};
-
-for (const lang of SUPPORTED_LANGS) {
-  try {
-    displayNameFormatters[lang] = new Intl.DisplayNames([lang], { type: 'region' });
-  } catch {
-    displayNameFormatters[lang] = null;
-  }
-}
+const displayNameFormatters = new Map<string, Intl.DisplayNames | null>();
 
 function getLocalizedCountryName(isoCode: string, fallback: string, lang: Lang): string {
   try {
-    const formatter = displayNameFormatters[lang];
+    let formatter = displayNameFormatters.get(lang);
+    if (formatter === undefined) {
+      try {
+        formatter = new Intl.DisplayNames([lang], { type: 'region' });
+      } catch {
+        formatter = null;
+      }
+      displayNameFormatters.set(lang, formatter);
+    }
     return formatter?.of(isoCode) || fallback;
   } catch {
     return fallback;
   }
 }
 
+function resolveAiLanguageLabel(lang: string, darijaMode: boolean): string {
+  const base = lang.toLowerCase().split('-')[0];
+  if (base === 'ar') {
+    return darijaMode
+      ? 'natural, warm Moroccan Darija (الدارجة المغربية الأصيلة والمفهومة) — or Modern Standard Arabic if the user speaks in MSA'
+      : 'clear Modern Standard Arabic (العربية الفصحى السلسة)';
+  }
+  try {
+    const label = new Intl.DisplayNames(['en'], { type: 'language' }).of(lang);
+    if (label && label.toLowerCase() !== lang.toLowerCase()) {
+      return label;
+    }
+  } catch {
+    // fallback below
+  }
+  return lang || 'English';
+}
+
 const allCountriesRaw = Country.getAllCountries();
-const allCitiesRaw = City.getAllCities();
+let allCitiesCache: ReturnType<typeof City.getAllCities> | null = null;
+function getAllCitiesLazy() {
+  if (!allCitiesCache) {
+    allCitiesCache = City.getAllCities();
+  }
+  return allCitiesCache;
+}
 const citiesCache = new Map<
   string,
   Array<{ name: string; arabicName?: string; latitude: number; longitude: number; stateCode: string }>
@@ -343,8 +413,7 @@ async function startServer() {
 
   // 1. All world countries with flags and localized names
   app.get('/api/locations/countries', (req, res) => {
-    const rawLang = String(req.query.lang || 'ar');
-    const lang: Lang = SUPPORTED_LANGS.includes(rawLang as Lang) ? (rawLang as Lang) : 'ar';
+    const lang = normalizeWorldLang(req.query.lang, 'ar');
 
     const countries = allCountriesRaw
       .map((c) => ({
@@ -355,7 +424,13 @@ async function startServer() {
         latitude: Number(c.latitude) || 0,
         longitude: Number(c.longitude) || 0,
       }))
-      .sort((a, b) => a.localizedName.localeCompare(b.localizedName, lang));
+      .sort((a, b) => {
+        try {
+          return a.localizedName.localeCompare(b.localizedName, lang);
+        } catch {
+          return a.localizedName.localeCompare(b.localizedName);
+        }
+      });
 
     res.json({ countries });
   });
@@ -422,8 +497,7 @@ async function startServer() {
   app.get('/api/locations/reverse', async (req, res) => {
     const lat = Number(req.query.lat);
     const lng = Number(req.query.lng);
-    const rawLang = String(req.query.lang || 'ar');
-    const lang: Lang = SUPPORTED_LANGS.includes(rawLang as Lang) ? (rawLang as Lang) : 'ar';
+    const lang = normalizeWorldLang(req.query.lang, 'ar');
 
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
       res.status(400).json({ error: 'Valid lat and lng are required' });
@@ -475,6 +549,7 @@ async function startServer() {
     }
 
     // Offline fallback: find nearest city across all cities in dataset
+    const allCitiesRaw = getAllCitiesLazy();
     let bestCity = allCitiesRaw[0];
     let minDist = Infinity;
     for (const c of allCitiesRaw) {
@@ -547,9 +622,8 @@ async function startServer() {
       return;
     }
 
-    const rawLang = String(req.query.lang || 'ar');
-    const lang: Lang = SUPPORTED_LANGS.includes(rawLang as Lang) ? (rawLang as Lang) : 'ar';
-    const edition = QURAN_EDITIONS[lang];
+    const lang = normalizeWorldLang(req.query.lang, 'ar');
+    const edition = QURAN_EDITIONS[lang] || QURAN_EDITIONS[lang.split('-')[0]] || 'en.sahih';
     const cacheKey = `${num}:${edition}`;
 
     const cached = surahDetailCache.get(cacheKey);
@@ -871,19 +945,7 @@ out center 40;
         return;
       }
 
-      const languageNames: Record<Lang, string> = {
-        ar: darijaMode
-          ? 'natural, warm Moroccan Darija (الدارجة المغربية الأصيلة والمفهومة) — unless the user explicitly writes in Classical/MSA Arabic, in which case match their style naturally'
-          : 'clear Modern Standard Arabic (العربية الفصحى السلسة)',
-        en: 'English',
-        fr: 'French (Français)',
-        tr: 'Turkish (Türkçe)',
-        ur: 'Urdu (اردو)',
-        id: 'Indonesian (Bahasa Indonesia)',
-        es: 'Spanish (Español)',
-      };
-
-      const targetLanguage = languageNames[lang] || languageNames.ar;
+      const targetLanguage = resolveAiLanguageLabel(normalizeWorldLang(lang, 'ar'), darijaMode);
       const locationContext =
         cityName && countryName ? `The user is currently located in ${cityName}, ${countryName}.` : '';
 
@@ -1168,12 +1230,31 @@ Keep your answers clear, practical, conversational, and easy to listen to when r
   }, 20000);
 
   if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
+    let viteMiddleware: express.RequestHandler | null = null;
+    const viteReadyPromise = import('vite')
+      .then(({ createServer: createViteServer }) =>
+        createViteServer({
+          server: { middlewareMode: true },
+          appType: 'spa',
+        })
+      )
+      .then((vite) => {
+        viteMiddleware = vite.middlewares;
+      });
+
+    app.use(async (req, res, next) => {
+      try {
+        await viteReadyPromise;
+        if (viteMiddleware) {
+          viteMiddleware(req, res, next);
+          return;
+        }
+      } catch (err) {
+        next(err);
+        return;
+      }
+      next();
     });
-    app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');
     app.use(express.static(distPath));
@@ -1182,7 +1263,158 @@ Keep your answers clear, practical, conversational, and easy to listen to when r
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = http.createServer(app);
+
+  // 10. Real-time Gemini Live API (/live) voice-to-voice WebSocket bridge
+  const liveWss = new WebSocketServer({ server: httpServer, path: '/live' });
+
+  liveWss.on('connection', (clientWs, req) => {
+    const reqUrl = new URL(req.url || '/live', `http://${req.headers.host || 'localhost'}`);
+    const lang = normalizeWorldLang(reqUrl.searchParams.get('lang'), 'ar');
+    const darijaMode = reqUrl.searchParams.get('darija') !== '0';
+    const voiceChoice = reqUrl.searchParams.get('voice') === 'man' ? 'man' : 'woman';
+    const prebuiltVoiceName = voiceChoice === 'man' ? 'Charon' : 'Zephyr';
+    const cityName = reqUrl.searchParams.get('city') || '';
+    const countryName = reqUrl.searchParams.get('country') || '';
+
+    if (!process.env.GEMINI_API_KEY) {
+      if (clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(JSON.stringify({ type: 'error', message: 'GEMINI_API_KEY is not configured.' }));
+        clientWs.close();
+      }
+      return;
+    }
+
+    const targetLanguage = resolveAiLanguageLabel(lang, darijaMode);
+    const locationContext =
+      cityName && countryName ? `The user is currently located in ${cityName}, ${countryName}.` : '';
+
+    const systemInstruction = `You are "السكينة AI" (Sakina AI), a warm, intelligent, calm spiritual and everyday voice companion.
+Respond directly in natural spoken voice like a close, helpful friend sending a WhatsApp voice reply—concise, clear, and comforting.
+Speak in ${targetLanguage}. If the user speaks in Moroccan Darija, respond naturally in Moroccan Darija; if they speak another language, match their language naturally.
+${locationContext}
+Answer any question the user asks freely (daily life, advice, emotional calm, Quran, Hadith, Islamic guidance, study, work, cooking, general knowledge).`;
+
+    let closed = false;
+    let turnActive = false;
+    const sessionPromise = liveAi.live
+      .connect({
+        model: 'gemini-3.8-live',
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: prebuiltVoiceName } },
+          },
+          realtimeInputConfig: {
+            automaticActivityDetection: {
+              disabled: true,
+            },
+          },
+          systemInstruction,
+        },
+        callbacks: {
+          onopen: () => {
+            if (!closed && clientWs.readyState === WebSocket.OPEN) {
+              clientWs.send(JSON.stringify({ type: 'ready' }));
+            }
+          },
+          onmessage: (message: LiveServerMessage) => {
+            if (closed || clientWs.readyState !== WebSocket.OPEN) return;
+
+            for (const part of message.serverContent?.modelTurn?.parts ?? []) {
+              if (part.inlineData?.data) {
+                clientWs.send(JSON.stringify({ type: 'audio', data: part.inlineData.data }));
+              }
+            }
+
+            if (message.serverContent?.interrupted) {
+              clientWs.send(JSON.stringify({ type: 'interrupted' }));
+            }
+
+            if (message.serverContent?.turnComplete) {
+              clientWs.send(JSON.stringify({ type: 'turnComplete' }));
+            }
+          },
+          onerror: (err: unknown) => {
+            console.error('Gemini Live error:', err);
+            if (!closed && clientWs.readyState === WebSocket.OPEN) {
+              const evtMsg = (err as { message?: string })?.message;
+              const message =
+                evtMsg || (err instanceof Error ? err.message : 'Gemini Live API error');
+              clientWs.send(JSON.stringify({ type: 'error', message }));
+            }
+          },
+          onclose: () => {
+            if (!closed && clientWs.readyState === WebSocket.OPEN) {
+              clientWs.send(JSON.stringify({ type: 'closed' }));
+            }
+          },
+        },
+      })
+      .catch((err: unknown) => {
+        console.error('Gemini Live connect failed:', err);
+        if (!closed && clientWs.readyState === WebSocket.OPEN) {
+          const message = err instanceof Error ? err.message : 'Unable to connect to Gemini Live API';
+          clientWs.send(JSON.stringify({ type: 'error', message }));
+          clientWs.close();
+        }
+        return null;
+      });
+
+    clientWs.on('message', (rawData) => {
+      let msg: { type?: string; audio?: string };
+      try {
+        msg = JSON.parse(rawData.toString()) as { type?: string; audio?: string };
+      } catch {
+        return;
+      }
+
+      sessionPromise.then((session) => {
+        if (!session || closed) return;
+        try {
+          if (msg.type === 'activityStart') {
+            if (!turnActive) {
+              turnActive = true;
+              session.sendRealtimeInput({ activityStart: {} });
+            }
+          } else if (msg.type === 'audio' && msg.audio) {
+            if (!turnActive) {
+              turnActive = true;
+              session.sendRealtimeInput({ activityStart: {} });
+            }
+            session.sendRealtimeInput({
+              audio: { data: msg.audio, mimeType: 'audio/pcm;rate=16000' },
+            });
+          } else if (msg.type === 'activityEnd' || msg.type === 'audioStreamEnd') {
+            if (turnActive) {
+              turnActive = false;
+              session.sendRealtimeInput({ activityEnd: {} });
+            }
+          }
+        } catch (err) {
+          if (clientWs.readyState === WebSocket.OPEN) {
+            const errMsg = err instanceof Error ? err.message : 'Live audio send error';
+            clientWs.send(JSON.stringify({ type: 'error', message: errMsg }));
+          }
+        }
+      });
+    });
+
+    clientWs.on('close', () => {
+      closed = true;
+      sessionPromise.then((session) => {
+        if (session) {
+          try {
+            session.close();
+          } catch {
+            // ignore close error
+          }
+        }
+      });
+    });
+  });
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Sakina AI server running on http://localhost:${PORT}`);
   });
 }

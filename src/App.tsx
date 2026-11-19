@@ -10,7 +10,7 @@ import type {
   PrayerKey,
   TabId,
 } from './types';
-import { LANGUAGES, TRANSLATIONS } from './i18n/translations';
+import { getLanguageMeta, getUiTranslation } from './i18n/translations';
 import {
   MUEZZINS,
   computePrayerSchedule,
@@ -73,6 +73,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   use24Hour: true,
   quranFontSize: 28,
   reciterId: 'alafasy',
+  aiVoice: 'woman',
   adhan: {
     muezzin: 'moroccan',
     enabledPrayers: {
@@ -110,6 +111,8 @@ function loadInitialSettings(): AppSettings {
                 : parsed.cityLng ?? DEFAULT_SETTINGS.cityLng,
           }
         : {}),
+      reciterId: parsed.reciterId || DEFAULT_SETTINGS.reciterId,
+      aiVoice: parsed.aiVoice === 'man' ? 'man' : 'woman',
       adhan: {
         ...DEFAULT_SETTINGS.adhan,
         ...(parsed.adhan || {}),
@@ -284,8 +287,8 @@ export default function App() {
   const firedPreAlertRef = useRef<string>('');
   const testAdhanTagRef = useRef<string>('');
 
-  const t = TRANSLATIONS[settings.language] || TRANSLATIONS.ar;
-  const langMeta = LANGUAGES.find((l) => l.code === settings.language) || LANGUAGES[0];
+  const t = getUiTranslation(settings.language);
+  const langMeta = getLanguageMeta(settings.language);
 
   // Persist settings and chosen city in localStorage
   useEffect(() => {
@@ -1205,6 +1208,7 @@ export default function App() {
             language={settings.language}
             cityName={settings.cityName}
             countryName={selectedCountry?.localizedName || 'المغرب'}
+            aiVoice={settings.aiVoice}
             t={t}
           />
         )}

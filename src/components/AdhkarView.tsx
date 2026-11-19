@@ -3,6 +3,7 @@ import { Check, RotateCcw } from 'lucide-react';
 import { ADHKAR_ITEMS, type AdhkarCategoryId } from '../data/adhkarData';
 import type { LanguageCode } from '../types';
 import type { UITranslation } from '../i18n/translations';
+import { resolveCoreLang } from '../i18n/worldLanguages';
 
 interface AdhkarViewProps {
   language: LanguageCode;
@@ -86,7 +87,8 @@ export const AdhkarView: React.FC<AdhkarViewProps> = ({ language, t }) => {
         {items.map((item) => {
           const current = counts[item.id] || 0;
           const done = current >= item.count;
-          const translation = language !== 'ar' ? item.translations[language] : '';
+          const coreLang = resolveCoreLang(language);
+          const translation = coreLang !== 'ar' ? item.translations[coreLang] : '';
 
           return (
             <div

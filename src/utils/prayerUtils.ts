@@ -14,6 +14,7 @@ import type {
   PrayerScheduleItem,
   ReciterId,
 } from '../types';
+import { resolveCoreLang } from '../i18n/worldLanguages';
 
 export interface ReciterOption {
   id: ReciterId;
@@ -170,7 +171,7 @@ export function suggestCalculationMethodForCountry(isoCode: string): Calculation
 }
 
 export function formatPrayerTime(date: Date, use24Hour: boolean, lang: LanguageCode): string {
-  const localeMap: Record<LanguageCode, string> = {
+  const localeMap: Record<string, string> = {
     ar: 'ar-MA',
     en: 'en-US',
     fr: 'fr-FR',
@@ -180,8 +181,9 @@ export function formatPrayerTime(date: Date, use24Hour: boolean, lang: LanguageC
     es: 'es-ES',
   };
 
+  const targetLocale = localeMap[lang] || lang || 'en-US';
   try {
-    return new Intl.DateTimeFormat(localeMap[lang] || 'en-US', {
+    return new Intl.DateTimeFormat(targetLocale, {
       hour: '2-digit',
       minute: '2-digit',
       hour12: !use24Hour,
@@ -196,11 +198,12 @@ export function formatHumanCountdown(
   prayerLabel: string,
   lang: LanguageCode
 ): string {
+  const coreLang = resolveCoreLang(lang);
   const totalMinutes = Math.max(0, Math.ceil(remainingSeconds / 60));
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
 
-  if (lang === 'ar') {
+  if (coreLang === 'ar') {
     if (remainingSeconds <= 5) return `حان الآن وقت أذان ${prayerLabel}`;
     if (totalMinutes < 1) return `باقي أقل من دقيقة لـ${prayerLabel}`;
     if (hours === 0) return `باقي ${minutes} دقيقة لـ${prayerLabel}`;
@@ -209,31 +212,31 @@ export function formatHumanCountdown(
     return `باقي ${hourWord} و ${minutes} دقيقة لـ${prayerLabel}`;
   }
 
-  if (lang === 'fr') {
+  if (coreLang === 'fr') {
     if (remainingSeconds <= 5) return `C'est l'heure de ${prayerLabel}`;
     if (hours === 0) return `${minutes} min restantes pour ${prayerLabel}`;
     return `${hours}h ${minutes}min restantes pour ${prayerLabel}`;
   }
 
-  if (lang === 'tr') {
+  if (coreLang === 'tr') {
     if (remainingSeconds <= 5) return `${prayerLabel} vakti girdi`;
     if (hours === 0) return `${prayerLabel} vaktine ${minutes} dakika kaldı`;
     return `${prayerLabel} vaktine ${hours} sa ${minutes} dk kaldı`;
   }
 
-  if (lang === 'ur') {
+  if (coreLang === 'ur') {
     if (remainingSeconds <= 5) return `${prayerLabel} کی اذان کا وقت ہو گیا ہے`;
     if (hours === 0) return `${prayerLabel} میں ${minutes} منٹ باقی ہیں`;
     return `${prayerLabel} میں ${hours} گھنٹے ${minutes} منٹ باقی ہیں`;
   }
 
-  if (lang === 'id') {
+  if (coreLang === 'id') {
     if (remainingSeconds <= 5) return `Waktu adzan ${prayerLabel} telah tiba`;
     if (hours === 0) return `${minutes} menit lagi menuju ${prayerLabel}`;
     return `${hours} jam ${minutes} menit lagi menuju ${prayerLabel}`;
   }
 
-  if (lang === 'es') {
+  if (coreLang === 'es') {
     if (remainingSeconds <= 5) return `Es la hora del adhan de ${prayerLabel}`;
     if (hours === 0) return `Faltan ${minutes} min para ${prayerLabel}`;
     return `Faltan ${hours} h ${minutes} min para ${prayerLabel}`;
@@ -343,7 +346,7 @@ export function haversineDistanceKm(lat1: number, lon1: number, lat2: number, lo
 }
 
 export function formatDates(date: Date, lang: LanguageCode): { gregorian: string; hijri: string } {
-  const localeMap: Record<LanguageCode, string> = {
+  const localeMap: Record<string, string> = {
     ar: 'ar-SA',
     en: 'en-US',
     fr: 'fr-FR',
@@ -352,7 +355,7 @@ export function formatDates(date: Date, lang: LanguageCode): { gregorian: string
     id: 'id-ID',
     es: 'es-ES',
   };
-  const loc = localeMap[lang] || 'ar-SA';
+  const loc = localeMap[lang] || lang || 'ar-SA';
 
   let gregorian = '';
   let hijri = '';
